@@ -1,3 +1,3 @@
-# oc-wp-plugins-themes
+# Genji Plugins and Themes
 
-Test repo to try OpenShift WordPress deployment.
+Plugin and Theme code for the Genji site.
