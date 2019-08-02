@@ -34,6 +34,10 @@ function airpress_cx_menu() {
 }
 add_action( 'admin_menu', 'airpress_cx_menu' );
 
+function airpress_admin_render(){
+	return "<div class='wrap'>what goes here?</div>";
+}
+
 function airpress_db_render( $active_tab = '' ) {
 	global $wpdb;
 
@@ -168,6 +172,8 @@ function airpress_admin_cx_tab($key,$config) {
 	$option_name = "airpress_cx".$key;
 	//$options = get_option( $option_name );
 
+	$uploads = wp_get_upload_dir();
+
 	$defaults = array(
 			"api_key" => "",
 			"app_id" => "",
@@ -176,7 +182,8 @@ function airpress_admin_cx_tab($key,$config) {
 			"api_url" => "https://api.airtable.com/v0/",
 			"fresh"  => "fresh",
 			"debug"	=> 0,
-			"log"	=> dirname(dirname(dirname(__FILE__)))."/airpress.log"
+			"log"	=> $uploads["basedir"] . "/airpress-" . uniqid() . ".log",
+			"log_max_size"	=> 3072
 		);
 
 	$options = array_merge($defaults,$config);
@@ -214,16 +221,6 @@ function airpress_admin_cx_tab($key,$config) {
 	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_cx_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
 
 	################################
-	################################
-	$section_title = "Request Caching";
-	$section_name = "airpress_cx".$key;
-
-	add_settings_section(
-		$section_name,
-		__( $section_title, 'airpress' ),
-		"airpress_admin_cx_render_section",
-		$option_name
-	);
 
 	################################
 	$field_name = "refresh";
@@ -250,6 +247,11 @@ function airpress_admin_cx_tab($key,$config) {
 	$field_title = "Debug Logfile";
 	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_cx_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
 
+	// ################################
+	// $field_name = "log_max_size";
+	// $field_title = "Logfile Max Size in Kilobytes (0 for unlimited)";
+	// add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_cx_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
+
 	###############################
 	$field_name = "delete";
 	$field_title = "Delete Configuration?";
@@ -260,7 +262,7 @@ function airpress_admin_cx_tab($key,$config) {
 
 function airpress_cx_validation($input){
 	global $wp_rewrite;
-
+	
 	if ($input["debug"] == 1 || $input["debug"] == 2){
 
 		if ( $h = @fopen($input["log"], "a") ){
@@ -270,6 +272,48 @@ function airpress_cx_validation($input){
 		} else {
 			$input["debug"] = 0;
 			add_settings_error('airpress_cx_log', esc_attr( 'settings_updated' ), esc_attr($input["log"])." is not writable.","error");
+		}
+
+	} else {
+
+		$manual_intervention = false;
+
+		if ( file_exists($input["log"]) ){
+
+			$manual_intervention = true;
+
+			if ( is_writable($input["log"]) ){
+
+				if ( $h = @fopen($input["log"], "w") ){
+					$message = "attempting to delete ".$input["log"];
+					fwrite($h, $message."\n");
+					fclose($h);
+				}
+
+				$parts = pathinfo($input["log"]);
+
+				// Let's only delete log files named airpress.log to avoid allowing
+				// this field to control the deletion of any file on the server
+				if ( $parts["basename"] == "airpress.log" ){
+
+					if ( unlink($input["log"]) ){
+						$manual_intervention = false;
+					} else {
+						if ( $h = @fopen($input["log"], "a") ){
+							$message = "failed to delete ".$input["log"];
+							fwrite($h, $message."\n");
+							fclose($h);
+						}
+					}
+
+				}
+
+			}
+
+		}
+
+		if ( $manual_intervention ){
+			add_settings_error('airpress_cx_log', esc_attr( 'settings_updated' ), "Please delete the log file at " . esc_attr($input["log"]),"error");
 		}
 
 	}
@@ -292,6 +336,10 @@ function airpress_admin_cx_render_element_text($args) {
 	$field_name = $args[2];
 
 	echo '<input type="text" id="' . $field_name . '" name="' . $option_name . '[' . $field_name . ']" value="' . $options[$field_name] . '" />';
+
+	if ( $field_name == "name" and $options[$field_name] == "New Configuration" ){
+		echo "<p style='color:red'>You must change the configuration name from 'New Configuration' to something unique!</p>";
+	}
 }
 
 function airpress_admin_cx_render_element_toggle($args) {

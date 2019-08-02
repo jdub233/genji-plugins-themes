@@ -58,7 +58,7 @@ class AirpressVirtualPosts {
 	If one of our redirect rules matched, we want to check to see if it WOULD HAVE matched
 	an actual wordpress post/page
 	*/
-	public function check_for_actual_page( $request, $simulation=false ) {
+	public function check_for_actual_page( $request, $simulation=false, $query = null ) {
 
 		if (isset($request->matched_rule)){
 
@@ -127,12 +127,18 @@ class AirpressVirtualPosts {
 			$connection = get_airpress_config("airpress_cx",$this->config["connection"]);
 
 			// We've matched a config. Let's check and see if a cooresponding record exists
-			$query = new AirpressQuery();
+			if ( is_null($query) ){
+				$query = new AirpressQuery();
+			}
 
 			$query->setConfig($connection);
 
 			$query->table($this->config["table"]);
 			
+			if ( ! empty($this->config["view"]) ){
+				$query->view($this->config["view"]);				
+			}
+
 			// Process formula to inject any vars
 			$formula = $this->config["formula"];
 			$i = 1;
@@ -147,7 +153,7 @@ class AirpressVirtualPosts {
 
 			// Handle sort parameter
 			if (isset($this->config["sort"]) && !empty($this->config["sort"])){
-				$query->sort($this->config["sort"]);
+				$query->sort($this->config["sort"],$this->config["sort_direction"]);
 			}
 
 			if ( $simulation ){
@@ -159,7 +165,7 @@ class AirpressVirtualPosts {
 			
 			$result = new AirpressCollection($query);
 
-			if (count($result) > 0){
+			if ( ! $query->hasErrors() && is_airpress_collection($result) > 0 ){
 				$this->AirpressCollection = $result;
 			}
 
@@ -187,8 +193,8 @@ class AirpressVirtualPosts {
 
 	public function last_chance_for_data($post){
 		global $wp,$wp_query;
-
-		if ( ! $this->config && function_exists("is_cornerstone") && is_cornerstone() == "render"){
+		
+		if ( ! $this->config && is_airpress_compatible_page_builder() == "render" ){
 
 			$configs = get_airpress_configs("airpress_vp");
 
@@ -216,6 +222,26 @@ class AirpressVirtualPosts {
 		}
 	}
 
+	public function pre_get_document_title_filter($title){
+		global $wp_query;
+		return $wp_query->post->post_title;
+	}
+
+	public function the_title_filter($title,$id = null){
+		global $wp_query;
+
+		if ( isset( $this->config["template"] ) && $this->config["template"] == $id ){
+			return $wp_query->post->post_title;
+		} else {
+			return $title;
+		}
+
+	}
+
+	public function wpseo_title($title){
+		global $wp_query;
+		return $wp_query->post->post_title;
+	}
 
 	public function check_for_virtual_page(){
 		global $wp, $wp_query;
@@ -227,7 +253,7 @@ class AirpressVirtualPosts {
 			if ($this->config["requested_post"] == false){
 
 				// if this virtual post returned data from Airtable, set it up
-				if ($this->AirpressCollection){
+				if ( ! is_airpress_empty($this->AirpressCollection) ){
 
 					// A virtual page requires an actual page to use as a template
 					// Consider if this template is named "My Template", it will have
@@ -277,6 +303,8 @@ class AirpressVirtualPosts {
 					if ( $title_field ){
 						if ( isset( $this->AirpressCollection[0][$title_field] ) ){
 							airpress_debug("$title_field exists so post_title is ".$this->AirpressCollection[0][$title_field].".");
+							add_filter("wpseo_og_og_title",[$this,"wpseo_title"]);
+							add_filter("wpseo_twitter_title",[$this,"wpseo_title"]);
 							$wp_query->post->post_title = $this->AirpressCollection[0][$title_field];
 						} else {
 
@@ -301,6 +329,11 @@ class AirpressVirtualPosts {
 
 							$wp_query->post->post_title = $post_title;
 							airpress_debug("fancy post_title provided: ".$post_title);
+						}
+
+						add_filter("the_title",[$this,"the_title_filter"], 10, 2);
+						if ( current_theme_supports( 'title-tag' ) ){
+							add_filter("pre_get_document_title",[$this,"pre_get_document_title_filter"],20);
 						}
 
 					}
@@ -329,9 +362,9 @@ class AirpressVirtualPosts {
 
 			$post->AirpressCollection = $this->AirpressCollection;
 
-			do_action("airpress_virtualpost_setup",$this->config);
-
 		}
+
+		do_action("airpress_virtualpost_setup",$this->config);
 
 	}
 
