@@ -11,6 +11,10 @@ class AirpressQuery {
 
 	private $errors;
 
+	public function toArray(){
+		return [];
+	}
+
 	public function __construct($table=null,$config=null,$params=array()){
 		global $airpress;
 
@@ -418,8 +422,8 @@ class AirpressQuery {
 		}
 		if (isset($error["message"])){
 			$this->errors[] = $error;
-		} else if (is_array($error)){
-			$this->errors = array_merge($this->errors,$errors);
+		// } else if (is_array($error)){
+		// 	$this->errors = array_merge($this->errors,$errors);
 		} else {
 			$this->errors[] = $error;
 		}
@@ -572,7 +576,7 @@ class AirpressQuery {
 					// look for it inside each record of our result set
 					foreach($records as &$record):$r = &$record["fields"];
 
-						if ( !isset($r[$field][0]["url"]) ){
+						if ( ! is_airpress_attachment($r[$field]) ){
 							// is either an empty image field or not an image field
 							continue;
 						}

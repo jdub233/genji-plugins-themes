@@ -37,6 +37,8 @@ class Airpress {
 			add_shortcode( 'apr_loop'.$i, array($this,'shortcode_loop') );
 		}
 
+		// add_action( 'the_content', array($this,"apr_do_shortcodes"), 7);
+
 		add_action( 'wp_footer', array($this,'renderDebugOutput') );
 		add_action( 'admin_footer', array($this,'renderDebugOutput') );
 		add_action( 'admin_bar_menu', array($this,'renderDebugToggle'), 999 );
@@ -45,11 +47,52 @@ class Airpress {
 		$this->loopScope = array();
 	}
 
-	public function simulateVirtualPost($request){
+	public function check_for_update(){
+		global $airpress_version;
+	    if ( get_option( 'airpress_version' ) != $airpress_version) {
+	        
+	    	// truncate log files
+	    	if ( $airpress_version == "1.1.55" ){
+	    		$this->truncate_log_files();
+	    	}
+
+	    	update_option("airpress_version", $airpress_version, false);
+
+	    }
+	}
+
+	public function simulateVirtualPost($request,$query = null){
 		airpress_debug(0,"Simulating Virtual Post",$request);
-		$this->virtualPosts->check_for_actual_page( $request, true);
+		if ( is_null($query) ){
+			$query = new AirpressQuery();
+		}
+		$this->virtualPosts->check_for_actual_page( $request, true, $query);
 		airpress_debug(0,"Simulated Virtual Post Collection",$this->virtualPosts->AirpressCollection);
 		return $this->virtualPosts->AirpressCollection;
+	}
+
+	public function apr_do_shortcodes($content = ''){
+		global $shortcode_tags;
+
+		$early_run_shortcodes = ["apr","apr_loop","apr_populate"];
+		$saved_shortcode_tags = [];
+
+		foreach($shortcode_tags as $tag => $executable){
+
+			if ( ! in_array($tag,$early_run_shortcodes) ){
+				$saved_shortcode_tags[$tag] = $executable;
+				unset($shortcode_tags[$tag]);
+			}
+
+		}
+
+		// only running the early_run_shortcodes
+		$content = do_shortcode($content);
+
+		$shortcode_tags = $saved_shortcode_tags;
+
+		return $content;
+
 	}
 
 /* CONFIGURATION FUNCTIONS */
@@ -60,6 +103,7 @@ class Airpress {
 
 	    $a = shortcode_atts( array(
 	        'field'				=> null,
+	        'default'			=> ""
 	    ), $atts );
 
 		if ( is_airpress_empty($post->AirpressCollection) ){
@@ -86,79 +130,34 @@ class Airpress {
 
 	    $replacementFields = array_unique($matches[1]);
 
-	    $output = "";
-	    foreach($records_to_loop as $record){
+	    if ( empty($records_to_loop) ){
 
-	    	// place current record at ZERO
-	    	array_unshift($this->loopScope,$record);
+	    	$output = $a["default"];
 
-	    	// Reset the template for each record
-	    	// By doing the shortcodes BEFORE any processing, we're ensuring that
-	    	// any nested loops ... or innermost loops are processed prior to outter most loops.
-	    	// if we don't do this all {{variables}} will be replaced by outter most loops.
+	    } else {
 
-	    	$template = do_shortcode($content);
+		    $output = "";
 
-	    	foreach($replacementFields as $replacementField){
+		    foreach($records_to_loop as $record){
 
-	    		$keys = explode("|", $replacementField);
-	    		$field = array_shift($keys);
-				$replacementValue = "";
-				
-				if ( strtolower($field) == "record_id" ){
-					if ( is_airpress_record($record)){
-						$replacementValue = $record->record_id();
-					} else {
-						airpress_debug(0,"Attempting to populate field $field on a non-populated record",$keys);
-					}
-				} else if ( ! is_airpress_empty( $record[$field] ) ){ 
-					// this means it IS an AirpressCollection with records
+		    	// place current record at ZERO
+		    	array_unshift($this->loopScope, $record);
 
-	    			if (empty($keys)){
-	    				// this shouldn't really happen because we can't output a collection
-	    				// we should be looking INSIDE the collection, but can't since keys is empty
-	    			} else {
-	    				$replacementValue = implode(", ", $record[$field]->getFieldValues($keys) );
-	    			}
+		    	// Reset the template for each record
+		    	// By doing the shortcodes BEFORE any processing, we're ensuring that
+		    	// any nested loops ... or innermost loops are processed prior to outter most loops.
+		    	// if we don't do this all {{variables}} will be replaced by outter most loops.
+		    	$template = do_shortcode($content);
 
-	    		// This field is an array
-	    		} else if (is_array($record[$field]) ){
+		    	$output .= airpress_parse_template($template, $record, $replacementFields);
 
-	    			if (empty($keys)){
-	    				$replacementValue = implode(", ",$record[$field]);
-	    			} else {
-	    				$array = $record[$field];
-	    				while (!empty($keys)){
-	    					$key = array_shift($keys);
-	    					$array = $array[$key];
-	    				}
-	    				if (is_array($array)){
-	    					$replacementValue = implode(", ",$array);
-	    				} else {
-	    					$replacementValue = $array;
-	    				}
-	    			}
-
-	    		} else if (isset($record[$field])){
-
-	    			$replacementValue = $record[$field];
-
-	    		} else {
-
-	    			$replacementValue = "";
-
-	    		}
-
-    			$template = str_replace("{{".$replacementField."}}", $replacementValue, $template);
-
-	    	}
-
-	    	$output .= $template;
-	    	// Take current record back off scope stack
-	    	array_shift($this->loopScope);
+		    	// Take current record back off scope stack
+		    	array_shift($this->loopScope);
+		    }
+		    
 	    }
 
-	    return $output;
+	    return preg_replace("`(<br />\n)+`","<br />\n",$output);
 	}
 
 	public function shortcode_populate($atts, $content=null, $tag){
@@ -192,7 +191,7 @@ class Airpress {
 
 		if ( ! empty($this->loopScope) ){
 			airpress_debug(0,"CANNOT POPULATE inside of apr_loop. Move all apr_populate shortcodes to the top of your content.");
-			return "apr_populate must not be called prior to any apr_loop, as apr_populate recursively populates records.";
+			return "apr_populate must be called inside apr_loop, as apr_populate recursively populates records.";
 		}
 
 	    $keys = explode("|", $a["field"]);
@@ -200,7 +199,7 @@ class Airpress {
 		// Gather IDs
 		$record_ids = $collection->getFieldValues($keys);
 
-		if ( is_airpress_record($record_ids[0]) ){
+		if ( isset($record_ids[0]) && is_airpress_record($record_ids[0]) ){
 			// This has ALREADY been populated fool! Move along.
 			return;
 		}
@@ -280,7 +279,8 @@ class Airpress {
 			'wrapper'			=> null,
 			'single'			=> null,
 			'rollup'			=> null,
-			'default'			=> null,
+			'condition'			=> null,
+			'default'			=> "",
 			'format'			=> null,
 			'loopscope'			=> null,
 			'glue'				=> "\n",
@@ -290,54 +290,78 @@ class Airpress {
 
 	    $single = (!isset($a["single"]) || strtolower($a["single"]) == "false")? false : true;
 
+	    $condition = ( isset($a["condition"]) )? $a["condition"] : false;
+
 		$recordTemplate = (isset($a["recordtemplate"]))? $a["recordtemplate"] : "%s\n";
 		$relatedTemplate = (isset($a["relatedtemplate"]))? $a["relatedtemplate"] : "%s\n";
-
 
    		$keys = explode("|", $a["field"]);
    		$values = array();
 
+   		$condition_match = true;
+
    		if ( ! empty($this->loopScope) ){
 
-   			$scope = ( is_null($a["loopscope"]) )? 0 : count($this->loopScope) - $a["loopscope"] - 1;
+   			$scope = ( is_null($a["loopscope"]) ) ? 0 : count($this->loopScope) - $a["loopscope"] - 1;
 
    			airpress_debug(0,"asking for $field_name: ".$scope." of ".count($this->loopScope));
 
    			$field = array_shift($keys);
+   			
+   			if ( $condition && ( empty($keys) || is_airpress_attachment($this->loopScope[$scope][$field]) ) ){
 
-   			if ( is_string($this->loopScope[$scope][$field]) ){
+				list($condition_field,$condition_value) = explode("|",$condition);
+				if ( $this->loopScope[$scope][$condition_field] != $condition_value){
+					$condition_match = false;
+				}
+			}
 
-   				$values = array($this->loopScope[$scope][$field]);
+			if ( $condition_match ):
 
-   			} else if ( is_array($this->loopScope[$scope][$field]) ){
+				if ( $field == "record_id" ){
+					$values = array($this->loopScope[$scope]->record_id());
+				} else if ( is_string($this->loopScope[$scope][$field]) ){
 
-	   			// If the intended field is an attachment, then can't treat as collection
-	   			if ( isset($this->loopScope[$scope][$field][$scope]["url"]) ){
-
-					$values = array();
-					foreach( $this->loopScope[$scope][$field] as $attachment ){
-						$values[] = airpress_getArrayValues($attachment,$keys);
+					if ( $condition ){
+						list($condition_field,$condition_value) = explode("|",$condition);
+						if ( $this->loopScope[$scope][$condition_field] == $condition_value){
+							$values = array($this->loopScope[$scope][$field]);
+						}
+					} else {
+	   					$values = array($this->loopScope[$scope][$field]);
 					}
 
-				} else {
-					$values = airpress_getArrayValues($this->loopScope[$scope][$field],$keys);
-				}
+	   			} else if ( is_array($this->loopScope[$scope][$field]) ){
 
-   			} else if ( is_airpress_collection($this->loopScope[$scope][$field]) ){
-   				
-   				$collection = $this->loopScope[$scope][$field];
+		   			// If the intended field is an attachment, then can't treat as collection
+		   			if ( is_airpress_attachment($this->loopScope[$scope][$field]) ){
 
-   				if ( ! is_airpress_empty($collection) ){
-					$values = $collection->getFieldValues($keys);
-   				}
+						$values = array();
+						foreach( $this->loopScope[$scope][$field] as $attachment ){
+							$values[] = airpress_getArrayValues($attachment,$keys);
+						}
 
-   			}
+					} else {
+						$values = airpress_getArrayValues($this->loopScope[$scope][$field],$keys);
+					}
+
+	   			} else if ( is_airpress_collection($this->loopScope[$scope][$field]) ){
+	   				
+	   				$collection = $this->loopScope[$scope][$field];
+
+	   				if ( ! is_airpress_empty($collection) ){
+						$values = $collection->getFieldValues($keys,$condition);
+	   				}
+
+	   			}
+
+	   		endif;
 
    		} else {
    			$collection = $post->AirpressCollection;
 
    			if ( is_airpress_collection($collection) ){
-				$values = $collection->getFieldValues($keys);
+				$values = $collection->getFieldValues($keys,$condition);
    			} else {
    				airpress_debug(0,"[apr field='".$field_name."'] attempting to be used on a page where there is no collection.",$collection);
    				return "[apr field='".$field_name."'] attempting to be used on a page where there is no collection.";
@@ -345,9 +369,20 @@ class Airpress {
 			
    		}
 
-		$output = "";
+   		// when a condition is set, we don't want to show a bunch of empty rows output
+   		// for all the unmet conditions.
+		if ( $condition ){
 
-		if ( ! is_null($values) ){
+			$values = array_filter($values, create_function('$value', 'return $value !== "";'));
+			if ( empty($values)){
+				$values = null;
+			}
+
+		}
+
+		$output = sprintf($a["wrapper"],$a["default"]);
+
+		if ( ! is_null($values) && ! empty($values) ){
 
 			if (isset($a["format"])){
 
@@ -453,6 +488,24 @@ class Airpress {
 			}
 		}
 
+	}
+
+	public function truncate_log_files(){
+		$connections = get_airpress_configs("airpress_cx");
+
+		foreach($connections as $config){
+
+			if ( ! empty($config["log"]) && file_exists($config["log"]) && is_writable($config["log"]) ){
+
+				$parts = pathinfo($config["log"]);
+
+				if ( $parts["basename"] == "airpress.log" && $h = @fopen($config["log"], "w") ){
+					fclose($h);
+				}
+
+			}
+
+		}
 	}
 
 	function debug(){

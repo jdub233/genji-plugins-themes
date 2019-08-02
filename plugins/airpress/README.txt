@@ -3,8 +3,8 @@ Contributors: chetmac
 Donate link: https://www.paypal.me/chetmac
 Tags: airtable, custom, custom field, data management, repeater, spreadsheet, remote data, api
 Requires at least: 4.6
-Tested up to: 4.8
-Stable tag: 1.1.42
+Tested up to: 5.2.1
+Stable tag: 1.1.58
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,42 @@ No. Airpress uses the same technique as WP Cron to refresh cached data in the ba
 7. Visit http://airtable.com/api to get your API Key and APP ID.
 
 == Changelog ==
+
+= 1.1.58 =
+* Compatibility Verification
+* Default value for apr_loop when empty: [apr_loop field='Vendors' default="I'm sorry dave. there are no records"] 
+* Made default filename for debug log random
+
+= 1.1.54 =
+* Added default value option: [apr field="Field Name" default="Sorry... no value found so you'll see this!"]
+
+= 1.1.53 =
+* Added (much) better error reporting in the VirtualPost config screen. Don't forget you can always enable the debugger to get even more debugging data.
+
+= 1.1.52 =
+* Integrate Freemius for analytic purposes and metrics for plugin improvement purposes.
+
+= 1.1.49 =
+* VirtualPost configurations now support Sort Direction and specifying a View (in addition to a Table).
+* Log file is now removed when logging is disabled
+
+= 1.1.48 =
+* Trigger airpress_virtualpost_setup action even when post->AirpressCollection is empty. Enables complete override of empty or failed Collections/queries.
+
+= 1.1.47 =
+* Title bugfix for VirtualPosts
+
+= 1.1.46 =
+* added $query->hasErrors() and $query->getErrors() so that in critical syncing applications your code can detect and handle any non "200" HTTP response
+
+= 1.1.45 =
+* Support the new(ish) title-tag enabled themes
+
+= 1.1.44 =
+* Bug fix
+
+= 1.1.43 =
+* Added attribute "condition" to [apr field=""]. Allows targeting of specific record/row when VirtualFields or VirtualPosts retrieve more than one record. Example usage would be: [apr field="Name" condition="Test Column|specific value"]
 
 = 1.1.42 =
 * Removed default value for VirualPost configuration "sort" field. It was causing Airtable API requests to respond with 422 "Unprocessable Entity" response (because it was not a valid field) with created 404's (as no records were returned). Thanks @mazoola
@@ -325,6 +361,32 @@ The name you give the connection is how you'll refer to this Connection from oth
 $query = new AirpressQuery();
 $query->setConfig("default");
 $query->table("My Airtable table name");
+?>
+`
+
+== Error Handling ==
+
+Since version 1.1.46 the AirpressQuery has the hasErrors() and getErrors() methods that should be used when doing any syncing operations as Airtable doesn't have a perfect 'uptime' record and you don't want to sync empty results just because your request either timed out or return a 422 error or something.
+
+`
+<?php
+$query = new AirpressQuery("My Table Name",0);
+$records = new AirpressCollection($query);
+
+if ( $query->hasErrors() ){
+	print_r($query->getErrors());
+	print_r($query->toString());
+
+	// or
+
+	$code = $errors[0]["code"];
+	$message = $errors[0]["message"];
+	$string = $query->toString();
+} else if ( is_airpress_empty($records) ) {
+	// Query was fine, just returned no results
+} else {
+	// Do something with $records
+}
 ?>
 `
 

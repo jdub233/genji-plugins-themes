@@ -16,7 +16,7 @@ add_action( 'admin_menu', 'airpress_vp_menu' );
 
 add_action( 'init', "airpress_vp_add_rules" );
 
-airpress_debug(0,"These are all teh hooks",$wp_filter);
+// airpress_debug(0,"These are all teh hooks",$wp_filter);
 
 //add_action('rewrite_rules_array','airpress_vp_update_permalinks');
 //permalink_structure_changed
@@ -124,6 +124,7 @@ function airpress_admin_vp_tab($key,$config) {
 		"formula"		=> "{Your Airtable Field} = '$1'",
 		"sort"			=> "",
 		"table"			=> "Your Airtable Table",
+		"view"			=> "",
 		"field"			=> "Your Airtable Field",
 		"field2"		=> "Your Airtable Field2",
 		"template"		=> null,
@@ -188,8 +189,18 @@ function airpress_admin_vp_tab($key,$config) {
 	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_vp_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
 
 	################################
+	$field_name = "sort_direction";
+	$field_title = "Sort direction";
+	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_vp_render_element_select__direction', $option_name, $section_name, array($options,$option_name,$field_name) );
+
+	################################
 	$field_name = "table";
 	$field_title = "Airtable Table Name";
+	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_vp_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
+
+	###############################
+	$field_name = "view";
+	$field_title = "Airtable Table View Name";
 	add_settings_field(	$field_name, __( $field_title, 'airpress' ), 'airpress_admin_vp_render_element_text', $option_name, $section_name, array($options,$option_name,$field_name) );
 
 	###############################
@@ -270,6 +281,10 @@ function airpress_admin_vp_render_element_text($args) {
 	$field_name = $args[2];
 
 	echo '<input type="text" id="' . $field_name . '" name="' . $option_name . '[' . $field_name . ']" value="' . $options[$field_name] . '" />';
+
+	if ( $field_name == "name" and $options[$field_name] == "New Configuration" ){
+		echo "<p style='color:red'>You must change the configuration name from 'New Configuration' to something unique!</p>";
+	}
 }
 
 function airpress_admin_vp_render_element_regex($args) {
@@ -301,12 +316,19 @@ function airpress_admin_vp_render_element_test($args) {
 		$request = new StdClass();
 		$request->request = trim($options["default"],"/")."/";
 		$request->matched_rule = $options["pattern"];
-		$collection = $airpress->simulateVirtualPost($request);
+		$query = new AirpressQuery();
+		$collection = $airpress->simulateVirtualPost($request,$query);
 
 		if ( is_airpress_collection($collection) ){
 			echo "<br>This test URL matches ".count($collection)." records in table <em>".$options["table"]."</em>";
 		} else {
-			echo "<br>No results from test url.";
+			echo "<br>No results from test url.<br>";
+			if ( $query->hasErrors() ){
+				echo "ERRORS:<br>";
+				foreach( $query->getErrors() as $error ){
+					echo "<strong style='color:red'>{$error['code']}</strong>: {$error['message']}<br>";
+				}
+			}
 		}
 
 	}
@@ -365,6 +387,25 @@ function airpress_admin_vp_render_element_select__page($args) {
 		$selected = ($options[$field_name] == $page->ID)? " selected" : "";
 		$option = '<option value="' . $page->ID . '"'.$selected.'>';
 		$option .= $page->post_title." (".$page->post_name.")";
+		$option .= '</option>';
+		echo $option;
+	}
+	echo '</select>';
+}
+
+function airpress_admin_vp_render_element_select__direction($args) {
+	$options = $args[0];
+	$option_name = $args[1];
+	$field_name = $args[2];
+
+	$directions = array(["value" => "asc","label" => "Ascending (A-Z)"],["value" => "desc","label" => "Descending (Z-A)"]);
+	
+	echo '<select id="' . $field_name . '" name="' . $option_name . '[' . $field_name . ']">';
+
+	foreach ( $directions as $d ) {
+		$selected = ($options[$field_name] == $d["value"])? " selected" : "";
+		$option = '<option value="' . $d["value"] . '"'.$selected.'>';
+		$option .= $d["label"];
 		$option .= '</option>';
 		echo $option;
 	}
